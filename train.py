@@ -28,8 +28,8 @@ class Args:
     policy: str = "direct"
 
     # Optimiziation
-    adv_lr: float = 1e-4
-    team_lr: float = 1e-3
+    adv_lr: float = 1e-3
+    team_lr: float = 1e-2
     max_grad_norm: float = 0.5
     gamma: float = 0.99
     nu: float = 0.05
@@ -56,7 +56,7 @@ def make_train(args):
 
         rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
         reinforce_fn = make_reinforce(args, rollout_fn)
-        br_fn = make_br(args, rollout_fn)
+        br_fn = make_br(args, rollout_fn, obs_dims)
         gap_fn = make_nash_gap(args, rollout_fn, br_fn, num_agents)
 
         rng, _rng = jax.random.split(rng)

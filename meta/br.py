@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 from models.optim import projection_simplex_truncated
 
-def make_br(args, rollout_fn):
+def make_br(args, rollout_fn, obs_dims):
 
     def _br_fn(rng, train_state):
 
@@ -28,7 +28,7 @@ def make_br(args, rollout_fn):
                         action_probs = jax.vmap(jax.vmap(lambda probs, idx: probs[idx]))(probs, data.action)
                         log_probs = jnp.log(action_probs + 1e-6)
                         gamma = jnp.cumprod(jnp.full(log_probs.shape[1], args.gamma)) / args.gamma
-                        temp_lambda = jax.vmap(jax.vmap(lambda obs, action: lambda_[jnp.ravel_multi_index(obs, (lambda_.shape[0], ), mode="clip"), action]))(data.obs, data.action)
+                        temp_lambda = jax.vmap(jax.vmap(lambda obs, action: lambda_[jnp.ravel_multi_index(obs, obs_dims[1:], mode="clip"), action]))(data.obs, data.action)
                         reward = data.reward - args.nu * temp_lambda
                         return -(gamma * reward * log_probs.cumsum(axis=1) * ~data.done.squeeze()).sum()
                     

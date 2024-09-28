@@ -44,7 +44,7 @@ def make_rollout(args, env, obs_dims, num_actions, num_agents):
                 returns + gamma * reward * valid_mask, 
                 valid_mask * (1 - done),
                 gamma * args.gamma,
-                lambda_.at[jnp.ravel_multi_index(obs[-1], (lambda_.shape[0], ), mode="clip"), actions[-1]].add(gamma)
+                lambda_.at[jnp.ravel_multi_index(obs[-1], obs_dims[1:], mode="clip"), actions[-1]].add(gamma)
             )
 
             return carry, transition

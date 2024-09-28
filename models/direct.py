@@ -9,9 +9,8 @@ class DirectParameterization(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-
         params = self.param("params", lambda _, shape: jnp.full(shape, 1 / self.num_actions), (math.prod(self.obs_dims), self.num_actions))
-        idx = jnp.ravel_multi_index(x, (params.shape[0], ), mode="clip")
+        idx = jnp.ravel_multi_index(x, self.obs_dims[1:], mode="clip")
 
         return params[idx]  
 
