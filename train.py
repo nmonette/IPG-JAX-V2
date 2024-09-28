@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 from meta import (
     make_rollout,
-    make_br
+    make_br,
+    TrainState
 )
 from models import create_train_state
 from environments import get_env
@@ -17,8 +18,9 @@ class Args:
     # Environment
     env: str = "matrix"
     num_steps: int = 1000
-    rollout_length: int = 10
-    num_rollouts: 512
+    num_br_steps: int = 100
+    rollout_length: int = 8
+    num_rollouts: int = 512
 
     # Model
     policy: str = "direct"
@@ -27,17 +29,21 @@ class Args:
     adv_lr: float = 1e-5
     team_lr: float = 1e-4
     max_grad_norm: float = 0.5
+    gamma: float = 0.99
+    nu: float = 0.05
+    trunc_size: float = 0.05
 
     # Experiment
     seed: int = 0
     batch_size: int = 32
+    num_epochs: int = 4
     log_interval: int = 10
     
     # WandB
     project: str = "ipg-jax"
     entity: str = "nathanmonette1"
     group: str = "debug"
-
+    log: bool = False
 
 
 def make_train(args):
@@ -46,32 +52,20 @@ def make_train(args):
 
         env, obs_dims, num_actions, num_agents = get_env(args)
 
-        rollout_fn = make_rollout(args, env, obs_dims, num_actions)
-        br_fn = make_br(args, rollout_fn)
+        rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
+        br_fn = jax.jit(make_br(args, rollout_fn))
 
         rng, _rng = jax.random.split(rng)
-        team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents)
+        team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
         rng, _rng = jax.random.split(rng)
-        adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1)
+        adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1, True)
 
-        def _loop_fn(carry, t):
-
-            rng, team_train_state, adv_train_state = carry
+        train_state = TrainState(team_train_state, adv_train_state)
             
-            adv_train_state, metrics = br_fn(rng, adv_train_state)
-            
-            return (rng, team_train_state, adv_train_state), metrics
-        
-        for _ in range(args.num_steps // args.log_interval):
+        rng, _rng = jax.random.split(rng)
+        train_state, metrics = br_fn(_rng, train_state)
 
-            rng, team_train_state, adv_train_state, metrics = jax.lax.scan(_loop_fn, (rng, team_train_state, adv_train_state), jnp.arange(args.log_interval))
-
-            for step in range(args.log_interval):
-                wandb.log(
-                    jax.tree_util.tree_map(lambda x: x[step], metrics)
-                )
-        
-        return team_train_state, adv_train_state
+        return metrics
     
     return _train_fn
 
@@ -80,19 +74,28 @@ def main():
 
     args = tyro.cli(Args)
 
-    wandb.init(
-        config=args,
-        project=args.project,
-        entity=args.entity,
-        group=args.group,
-        job_type="train",
-    )
+    if args.log:
+        wandb.init(
+            config=args,
+            project=args.project,
+            entity=args.entity,
+            group=args.group,
+            job_type="train",
+        )
 
     rng = jax.random.key(args.seed)
     train_fn = jax.jit(make_train(args))
 
-    team_train_state, adv_train_state = train_fn(rng)
+    metrics = train_fn(rng)
+
+    if args.log:
+        for step in range(args.num_br_steps):
+            wandb.log(
+                jax.tree_util.tree_map(lambda x: x[step], metrics)
+            )
+    else:
+        print(metrics)
 
 
-
-        
+if __name__ == "__main__":
+    main()

@@ -24,22 +24,19 @@ def make_br(args, rollout_fn):
 
                     @jax.value_and_grad
                     def loss_fn(params, data):
-
-                        probs = train_state.apply_fn({"params": params}, data.obs[None, ...])
-                        action_probs = jax.vmap(lambda probs, idx: probs[idx])(probs, data.action)
+                        probs = jax.vmap(jax.vmap(lambda obs: train_state.apply_fn(params, obs.reshape(1, -1))))(data.obs).squeeze()
+                        action_probs = jax.vmap(jax.vmap(lambda probs, idx: probs[idx]))(probs, data.action)
                         log_probs = jnp.log(action_probs + 1e-6)
-
-                        gamma = jnp.cumprod(jnp.full(log_probs.shape[0], args.gamma)) / args.gamma
-                        temp_lambda = jax.vmap(lambda obs, action: lambda_[jnp.ravel_multi_index(obs, args.obs_dims), action])(data.obs, data.action)
+                        gamma = jnp.cumprod(jnp.full(log_probs.shape[1], args.gamma)) / args.gamma
+                        temp_lambda = jax.vmap(jax.vmap(lambda obs, action: lambda_[jnp.ravel_multi_index(obs, (lambda_.shape[0], ), mode="clip"), action]))(data.obs, data.action)
                         reward = data.reward - args.nu * temp_lambda
-
-                        return -(gamma * reward * log_probs.cumsum(axis=1) * ~data.done).sum()
+                        return -(gamma * reward * log_probs.cumsum(axis=1) * ~data.done.squeeze()).sum()
                     
                     loss, grad = loss_fn(train_state.params, data)
                     train_state = train_state.apply_gradients(grads=grad)
-
+                    
                     train_state = train_state.replace(
-                        params = projection_simplex_truncated(train_state.params["params"], args.trunc_size)
+                        params = jax.tree_util.tree_map(lambda x: projection_simplex_truncated(x, args.trunc_size), train_state.params)
                     ) 
 
                     return train_state, loss
@@ -48,28 +45,32 @@ def make_br(args, rollout_fn):
                 perm = jax.random.permutation(_rng, args.num_rollouts)
                 num_mini_batches = args.num_rollouts // args.batch_size
                 get_fn = lambda x: (
-                    x[perm, -1]
-                    .reshape(num_mini_batches, -1, x.shape[1:])
+                    x[perm, :, -1]
                 )
-
-                data = jax.tree_util.tree_map(get_fn, rollout_data)
+                reshape_fn = lambda x: (
+                    x.reshape(num_mini_batches, -1, *x.shape[1:])
+                )
                 
+                data = jax.tree_util.tree_map(get_fn, rollout_data)
+                data = jax.tree_util.tree_map(reshape_fn, data)
                 train_state, losses = jax.lax.scan(minibatch, train_state, data)
                 
                 return (rng, train_state, rollout_data), losses
             
-            (rng, train_state, _), losses = jax.lax.scan(epoch, (rng, train_state, rollout_data), jnp.arange(args.num_epochs))
+            (rng, adv_train_state, _), losses = jax.lax.scan(epoch, (rng, train_state.adv_train_state, rollout_data), jnp.arange(args.num_epochs))
 
             metrics = {
-                "adv_br_return": returns.mean(),
+                "adv_br_return": returns[-1].mean(),
                 "adv_br_loss": losses.mean()
             }
 
-            return (rng, train_state), metrics
+            return (rng, train_state.replace(adv_train_state = adv_train_state)), metrics
         
-        (_, train_state), metrics = jax.lax.scan(_br_loop, (rng, train_state), jnp.arange(args.num_steps))
+        (_, train_state), metrics = jax.lax.scan(_br_loop, (rng, train_state), jnp.arange(args.num_br_steps))
 
         return train_state, metrics
+    
+    return _br_fn
             
             
 
