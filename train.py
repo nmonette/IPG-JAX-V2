@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from meta import (
     make_rollout,
     make_br,
+    make_reinforce,
     TrainState
 )
 from models import create_train_state
@@ -53,6 +54,7 @@ def make_train(args):
         env, obs_dims, num_actions, num_agents = get_env(args)
 
         rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
+        reinforce_fn = make_reinforce(args, rollout_fn)
         br_fn = jax.jit(make_br(args, rollout_fn))
 
         rng, _rng = jax.random.split(rng)
@@ -62,8 +64,19 @@ def make_train(args):
 
         train_state = TrainState(team_train_state, adv_train_state)
             
+        def loop(carry, t):
+            rng, train_state = carry
+
+            rng, _rng = jax.random.split(rng)
+            train_state, _ = br_fn(_rng, train_state)
+
+            rng, _rng = jax.random.split(rng)
+            train_state, metrics = reinforce_fn(_rng, train_state)
+
+            return (rng, train_state), metrics
+
         rng, _rng = jax.random.split(rng)
-        train_state, metrics = br_fn(_rng, train_state)
+        (rng, train_state), metrics = jax.lax.scan(loop, (rng, train_state), xs=jnp.arange(args.num_steps))
 
         return metrics
     
