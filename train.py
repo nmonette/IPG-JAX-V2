@@ -28,8 +28,8 @@ class Args:
     policy: str = "direct"
 
     # Optimiziation
-    adv_lr: float = 1e-5
-    team_lr: float = 1e-4
+    adv_lr: float = 1e-4
+    team_lr: float = 1e-3
     max_grad_norm: float = 0.5
     gamma: float = 0.99
     nu: float = 0.05
@@ -57,7 +57,7 @@ def make_train(args):
         rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
         reinforce_fn = make_reinforce(args, rollout_fn)
         br_fn = make_br(args, rollout_fn)
-        gap_fn = make_nash_gap(args, rollout_fn, num_agents)
+        gap_fn = make_nash_gap(args, rollout_fn, br_fn, num_agents)
 
         rng, _rng = jax.random.split(rng)
         team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
@@ -86,7 +86,18 @@ def make_train(args):
         rng, _rng = jax.random.split(rng)
         (rng, train_state), (metrics, all_train_states) = jax.lax.scan(loop, (rng, train_state), xs=jnp.arange(args.num_steps))
 
-        avg_train_states = jax.tree_util.tree_map(lambda x: x.cumsum(axis=0) / jnp.ones(x.shape[0]).cumsum(), all_train_states)
+        avg_train_states = all_train_states.replace(
+            team_train_state = all_train_states.team_train_state.replace(
+                params = jax.tree_util.tree_map(
+                    lambda x: x.cumsum(axis=0) / jnp.ones(x.shape[0]).cumsum().reshape(args.num_steps, -1, 1, 1), all_train_states.team_train_state.params
+                )
+            ),
+            adv_train_state = all_train_states.adv_train_state.replace(
+                params = jax.tree_util.tree_map(
+                    lambda x: x.cumsum(axis=0) / jnp.ones(x.shape[0]).cumsum().reshape(args.num_steps, -1, 1, 1), all_train_states.adv_train_state.params
+                )
+            )
+        )
 
         ## NOTE: we should really do this every n steps instead haha
         rng, _rng = jax.random.split(rng)

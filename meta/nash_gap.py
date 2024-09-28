@@ -100,7 +100,8 @@ def make_nash_gap(args, rollout_fn, br_fn, num_agents):
 
         # --- Collect team's BR returns ---
         rng, _rng = jax.random.split(rng)
-        team_returns = jax.vmap(reinforce_fn, in_axes=(0, None, 0))(_rng, train_state, jnp.arange(num_agents))
+        _rng = jax.random.split(_rng, num_agents - 1)
+        team_returns = jax.vmap(reinforce_fn, in_axes=(0, None, 0))(_rng, train_state, jnp.arange(num_agents - 1))
 
         team_gap = team_returns - init_returns[:-1] 
 
