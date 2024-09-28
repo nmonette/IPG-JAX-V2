@@ -93,6 +93,8 @@ def make_train(args):
         _rng = jax.random.split(_rng, args.num_steps)
         gaps = jax.vmap(gap_fn)(_rng, avg_train_states)
 
+        metrics["nash_gap"] = gaps
+
         return metrics
     
     return _train_fn
