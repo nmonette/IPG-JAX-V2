@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from models.optim import projection_simplex_truncated
 
 def make_reinforce(args, rollout_fn):
+    
     def reinforce(rng, train_state):
         # --- Collect rollouts ---
         rng, _rng = jax.random.split(rng)

@@ -9,6 +9,7 @@ from meta import (
     make_rollout,
     make_br,
     make_reinforce,
+    make_nash_gap,
     TrainState
 )
 from models import create_train_state
@@ -55,7 +56,8 @@ def make_train(args):
 
         rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
         reinforce_fn = make_reinforce(args, rollout_fn)
-        br_fn = jax.jit(make_br(args, rollout_fn))
+        br_fn = make_br(args, rollout_fn)
+        gap_fn = make_nash_gap(args, rollout_fn, num_agents)
 
         rng, _rng = jax.random.split(rng)
         team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
@@ -68,15 +70,28 @@ def make_train(args):
             rng, train_state = carry
 
             rng, _rng = jax.random.split(rng)
-            train_state, _ = br_fn(_rng, train_state)
+            train_state, adv_metrics = br_fn(_rng, train_state)
 
             rng, _rng = jax.random.split(rng)
-            train_state, metrics = reinforce_fn(_rng, train_state)
+            train_state, team_metrics = reinforce_fn(_rng, train_state)
 
-            return (rng, train_state), metrics
+            metrics = {
+                **team_metrics,
+                "adv_br_loss": adv_metrics["adv_br_loss"][-1],
+                "adv_return": adv_metrics["adv_br_return"][-1]
+            }
+
+            return (rng, train_state), (metrics, train_state)
 
         rng, _rng = jax.random.split(rng)
-        (rng, train_state), metrics = jax.lax.scan(loop, (rng, train_state), xs=jnp.arange(args.num_steps))
+        (rng, train_state), (metrics, all_train_states) = jax.lax.scan(loop, (rng, train_state), xs=jnp.arange(args.num_steps))
+
+        avg_train_states = jax.tree_util.tree_map(lambda x: x.cumsum(axis=0) / jnp.ones(x.shape[0]).cumsum(), all_train_states)
+
+        ## NOTE: we should really do this every n steps instead haha
+        rng, _rng = jax.random.split(rng)
+        _rng = jax.random.split(_rng, args.num_steps)
+        gaps = jax.vmap(gap_fn)(_rng, avg_train_states)
 
         return metrics
     
@@ -102,7 +117,7 @@ def main():
     metrics = train_fn(rng)
 
     if args.log:
-        for step in range(args.num_br_steps):
+        for step in range(args.num_steps):
             wandb.log(
                 jax.tree_util.tree_map(lambda x: x[step], metrics)
             )
