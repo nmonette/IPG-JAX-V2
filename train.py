@@ -39,7 +39,7 @@ class Args:
     seed: int = 0
     batch_size: int = 32
     num_epochs: int = 4
-    log_interval: int = 10
+    log_interval: int = 100
     
     # WandB
     project: str = "ipg-jax"
@@ -57,7 +57,7 @@ def make_train(args):
         rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
         reinforce_fn = make_reinforce(args, rollout_fn)
         br_fn = make_br(args, rollout_fn, obs_dims)
-        gap_fn = make_nash_gap(args, rollout_fn, br_fn, num_agents)
+        gap_fn = jax.jit(jax.vmap(make_nash_gap(args, rollout_fn, br_fn, num_agents)))
 
         rng, _rng = jax.random.split(rng)
         team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
@@ -83,32 +83,74 @@ def make_train(args):
 
             return (rng, train_state), (metrics, train_state)
 
-        rng, _rng = jax.random.split(rng)
-        (rng, train_state), (metrics, all_train_states) = jax.lax.scan(loop, (rng, train_state), xs=jnp.arange(args.num_steps))
+        
+        for t in range(0, args.num_steps, args.log_interval):
 
-        avg_train_states = all_train_states.replace(
-            team_train_state = all_train_states.team_train_state.replace(
-                params = jax.tree_util.tree_map(
-                    lambda x: x.cumsum(axis=0) / jnp.ones(x.shape[0]).cumsum().reshape(args.num_steps, -1, 1, 1), all_train_states.team_train_state.params
-                )
-            ),
-            adv_train_state = all_train_states.adv_train_state.replace(
-                params = jax.tree_util.tree_map(
-                    lambda x: x.cumsum(axis=0) / jnp.ones(x.shape[0]).cumsum().reshape(args.num_steps, -1, 1, 1), all_train_states.adv_train_state.params
+            rng, _rng = jax.random.split(rng)
+            (rng, train_state), (metrics, all_train_states) = jax.lax.scan(loop, (rng, train_state), xs=jnp.arange(t, t + args.log_interval))
+
+            avg_train_states = all_train_states.replace(
+                team_train_state = all_train_states.team_train_state.replace(
+                    params = jax.tree_util.tree_map(
+                        lambda x: x.cumsum(axis=0) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), all_train_states.team_train_state.params
+                    )
+                ),
+                adv_train_state = all_train_states.adv_train_state.replace(
+                    params = jax.tree_util.tree_map(
+                        lambda x: x.cumsum(axis=0) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), all_train_states.adv_train_state.params
+                    )
                 )
             )
+
+            ## NOTE: we should really do this every n steps instead haha
+            rng, _rng = jax.random.split(rng)
+            _rng = jax.random.split(_rng, args.log_interval)
+            gaps = gap_fn(_rng, avg_train_states)
+
+            metrics["nash_gap"] = gaps
+
+            for step in range(args.log_interval):
+                wandb.log(
+                    jax.tree_util.tree_map(lambda x: x[step], metrics)
+                )
+        
+    return _train_fn
+
+
+def test_br():
+
+    args = tyro.cli(Args)
+
+    if args.log:
+        wandb.init(
+            config=args,
+            project=args.project,
+            entity=args.entity,
+            group=args.group,
+            job_type="train",
         )
 
-        ## NOTE: we should really do this every n steps instead haha
-        rng, _rng = jax.random.split(rng)
-        _rng = jax.random.split(_rng, args.num_steps)
-        gaps = jax.vmap(gap_fn)(_rng, avg_train_states)
+    rng = jax.random.key(args.seed)
 
-        metrics["nash_gap"] = gaps
+    env, obs_dims, num_actions, num_agents = get_env(args)
 
-        return metrics
+    rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
+    br_fn = make_br(args, rollout_fn, obs_dims)
+
+    rng, _rng = jax.random.split(rng)
+    team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
+    rng, _rng = jax.random.split(rng)
+    adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1, True)
+
+    train_state = TrainState(team_train_state, adv_train_state)
     
-    return _train_fn
+    rng, _rng = jax.random.split(rng)
+    train_state, metrics = jax.jit(br_fn)(_rng, train_state)
+
+    for step in range(args.num_br_steps):
+        wandb.log(
+            jax.tree_util.tree_map(lambda x: x[step], metrics)
+        )
 
 
 def main():
@@ -125,18 +167,8 @@ def main():
         )
 
     rng = jax.random.key(args.seed)
-    train_fn = jax.jit(make_train(args))
-
-    metrics = train_fn(rng)
-
-    if args.log:
-        for step in range(args.num_steps):
-            wandb.log(
-                jax.tree_util.tree_map(lambda x: x[step], metrics)
-            )
-    else:
-        print(metrics)
-
+    train_fn = make_train(args)
+    train_fn(rng)
 
 if __name__ == "__main__":
     main()
