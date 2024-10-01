@@ -83,7 +83,16 @@ def make_train(args):
 
             return (rng, train_state), (metrics, train_state)
 
-        
+
+        sum_train_states = train_state.replace(
+            team_train_state = train_state.team_train_state.replace(
+                params = jax.tree_util.tree_map(jnp.zeros_like, train_state.team_train_state.params)
+            ),
+            adv_train_state = train_state.adv_train_state.replace(
+                params = jax.tree_util.tree_map(jnp.zeros_like, train_state.adv_train_state.params)
+            )
+        )
+
         for t in range(0, args.num_steps, args.log_interval):
 
             rng, _rng = jax.random.split(rng)
@@ -98,6 +107,19 @@ def make_train(args):
                 adv_train_state = all_train_states.adv_train_state.replace(
                     params = jax.tree_util.tree_map(
                         lambda x: x.cumsum(axis=0) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), all_train_states.adv_train_state.params
+                    )
+                )
+            )
+            
+            sum_train_states = avg_train_states = all_train_states.replace(
+                team_train_state = train_state.team_train_state.replace(
+                    params = jax.tree_util.tree_map(
+                        lambda prev, x: prev + x.sum(axis=0), sum_train_states, all_train_states.team_train_state.params
+                    )
+                ),
+                adv_train_state = train_state.adv_train_state.replace(
+                    params = jax.tree_util.tree_map(
+                        lambda prev, x: prev + x.sum(axis=0), sum_train_states, all_train_states.adv_train_state.params
                     )
                 )
             )
