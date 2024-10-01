@@ -101,12 +101,12 @@ def make_train(args):
             avg_train_states = all_train_states.replace(
                 team_train_state = all_train_states.team_train_state.replace(
                     params = jax.tree_util.tree_map(
-                        lambda x: x.cumsum(axis=0) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), all_train_states.team_train_state.params
+                        lambda prev, x: (prev + x.cumsum(axis=0)) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), sum_train_states, all_train_states.team_train_state.params
                     )
                 ),
                 adv_train_state = all_train_states.adv_train_state.replace(
                     params = jax.tree_util.tree_map(
-                        lambda x: x.cumsum(axis=0) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), all_train_states.adv_train_state.params
+                        lambda prev, x: (prev + x.cumsum(axis=0)) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1),  sum_train_states, all_train_states.adv_train_state.params
                     )
                 )
             )
