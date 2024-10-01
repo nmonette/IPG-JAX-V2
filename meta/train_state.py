@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from flax.struct import dataclass
 from flax.training.train_state import TrainState
 
+
 @dataclass
 class TrainState:
     team_train_state: TrainState

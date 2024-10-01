@@ -1,5 +1,6 @@
 from .matrix import AdvMatrix, ENV_CONFIG as MATRIX_CONFIG
-from .multigrid import AdvMultiGrid, ENV_CONFIG as GRID_CONFIG
+# from .multigrid import AdvMultiGrid, ENV_CONFIG as GRID_CONFIG
+from .multigrid2 import AdvMultiGrid, ENV_CONFIG as GRID_CONFIG
 
 def get_env(args):
     if args.env == "matrix":

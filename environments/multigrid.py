@@ -22,8 +22,8 @@ class EnvState:
     done: int = 0
 
 ENV_CONFIG = {
-    "dim": 3,
-    "max_time": 12,
+    "dim": 6,
+    "max_time": 20,
     "num_agents": 3,
     "partial": True
 }
@@ -48,7 +48,7 @@ class AdvMultiGrid(environment.Environment):
 
         agents = jax.random.choice(agent_rng, self.possible_coords, shape=(self.num_agents,), p=probs)
         return EnvState(
-            jax.vmap(lambda i,p: Obj(i, p, jnp.array(1,jnp.int32), jnp.array(i == 2, jnp.int32)), in_axes=(0, 0))(jnp.arange(self.num_agents), agents),
+            jax.vmap(lambda i,p: Obj(i, p, jnp.array(1,jnp.int32), jnp.array(i == self.num_agents - 1, jnp.int32)), in_axes=(0, 0))(jnp.arange(self.num_agents), agents),
             Obj(0, goal1, jnp.array(1, jnp.int32)),
             Obj(1, goal2, jnp.array(1, jnp.int32)),
             jnp.array(0, jnp.int32),
@@ -66,10 +66,11 @@ class AdvMultiGrid(environment.Environment):
         return jnp.clip(pos, 0, self.dim - 1)
     
     def _handle_rewards(self, state, agent):
-        val1 =jnp.int32(jnp.array_equal(agent.pos, state.goal1.pos)) * state.goal1.active
+        val1 = jnp.int32(jnp.array_equal(agent.pos, state.goal1.pos)) * state.goal1.active
         val2 = jnp.int32(jnp.array_equal(agent.pos, state.goal2.pos)) * state.goal2.active
         val = val1 + val2
-        reward = ((1 - agent.adv) * jnp.full((self.num_agents, ), val, jnp.int32).at[-1].set(-val) + agent.adv * jnp.full((self.num_agents, ), -val, jnp.int32).at[-1].set(val))
+        reward = jnp.full((self.num_agents, ), val, jnp.int32).at[-1].set(-val) * jax.lax.select(agent.adv, -1, 1)
+
         return reward, val1, val2
 
     def get_obs(self, state):
@@ -95,7 +96,7 @@ class AdvMultiGrid(environment.Environment):
         goal1 = state.goal1.replace(active=jnp.int32(jnp.all(jnp.logical_and(state.goal1.active, jnp.logical_not(term1)))))
         goal2 = state.goal2.replace(active=jnp.int32(jnp.all(jnp.logical_and(state.goal2.active, jnp.logical_not(term2)))))
 
-        done = jnp.int32(jnp.logical_or(state.time + 1 == self.max_time, jnp.logical_or(jnp.sum(state.agent.active[:-1]) == 0, jnp.int32(state.agent.active[-1]) == 0)))
+        done = jnp.int32(jnp.logical_or(state.time + 1 >= self.max_time, jnp.logical_or(jnp.sum(state.agent.active[:-1]) == 0, jnp.int32(state.agent.active[-1]) == 0)))
         state = state.replace(time = state.time + 1, done=done, agent=agent, goal1=goal1, goal2=goal2)
         return (
             jax.lax.stop_gradient(self.get_obs(state)),
@@ -122,7 +123,7 @@ class AdvMultiGrid(environment.Environment):
         self, params = None
     ) -> spaces.Discrete:
         """Action space of the environment."""
-        return spaces.Discrete(5)
+        return spaces.Discrete(self.num_actions)
 
     def observation_space(self, params=None) -> spaces.Dict:
         """Observation space of the environment."""

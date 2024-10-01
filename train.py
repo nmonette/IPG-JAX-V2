@@ -147,11 +147,69 @@ def test_br():
     rng, _rng = jax.random.split(rng)
     train_state, metrics = jax.jit(br_fn)(_rng, train_state)
 
-    for step in range(args.num_br_steps):
-        wandb.log(
-            jax.tree_util.tree_map(lambda x: x[step], metrics)
+    if args.log:
+        for step in range(args.num_br_steps):
+            wandb.log(
+                jax.tree_util.tree_map(lambda x: x[step], metrics)
+            )
+
+
+def test_team():
+
+    args = tyro.cli(Args)
+
+    if args.log:
+        wandb.init(
+            config=args,
+            project=args.project,
+            entity=args.entity,
+            group=args.group,
+            job_type="train",
         )
 
+    rng = jax.random.key(args.seed)
+    env, obs_dims, num_actions, num_agents = get_env(args)
+
+    rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
+    reinforce_fn = make_reinforce(args, rollout_fn)
+
+    rng, _rng = jax.random.split(rng)
+    team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
+    rng, _rng = jax.random.split(rng)
+    adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1, True)
+
+    train_state = TrainState(team_train_state, adv_train_state)
+    
+    rng, _rng = jax.random.split(rng)
+
+    def scan_fn(carry, t):
+        rng, train_state, sum_params = carry
+
+        rng, _rng = jax.random.split(rng)
+        train_state, metrics = reinforce_fn(_rng, train_state)
+
+        sum_params = jax.tree_util.tree_map(
+            lambda x, y: x + y, sum_params, train_state.team_train_state.params
+        )
+
+        test_params = jax.tree_util.tree_map(
+            lambda x: x / t, sum_params
+        )
+
+        rng, _rng = jax.random.split(rng)
+        _, returns, _ = rollout_fn(_rng, train_state.replace(team_train_state = train_state.team_train_state.replace(params=test_params)))
+
+        metrics["avg_team_return"] = returns[0]
+
+        return (rng, train_state, sum_params), metrics
+
+    (_, train_state, _), metrics = jax.lax.scan(scan_fn, (rng, train_state, train_state.team_train_state.params), xs=jnp.arange(1, args.num_steps + 1))
+
+    if args.log:
+        for step in range(args.num_steps):
+            wandb.log(
+                jax.tree_util.tree_map(lambda x: x[step], metrics)
+            )
 
 def main():
 
@@ -171,4 +229,6 @@ def main():
     train_fn(rng)
 
 if __name__ == "__main__":
-    main()
+    # main()
+    test_br()
+    # test_team()
