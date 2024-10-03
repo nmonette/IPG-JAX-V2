@@ -155,5 +155,4 @@ def main():
     train_fn(rng)
 
 if __name__ == "__main__":
-    # main()
-    test_br()
+    main()
