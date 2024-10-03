@@ -30,7 +30,7 @@ def make_br(args, rollout_fn, obs_dims):
                         gamma = jnp.cumprod(jnp.full(log_probs.shape[1], args.gamma)) / args.gamma
                         temp_lambda = jax.vmap(jax.vmap(lambda obs, action: lambda_[jnp.ravel_multi_index(obs, obs_dims[1:], mode="clip"), action]))(data.obs, data.action)
                         reward = data.reward - args.nu * temp_lambda
-                        return -(gamma * reward * log_probs.cumsum(axis=1) * ~data.done.squeeze()).sum()
+                        return -(gamma * reward * log_probs.cumsum(axis=1) * data.valid_mask.squeeze()).sum()
                     
                     loss, grad = loss_fn(train_state.params, data)
                     train_state = train_state.apply_gradients(grads=grad)

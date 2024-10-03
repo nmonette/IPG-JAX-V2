@@ -28,8 +28,8 @@ class Args:
     policy: str = "direct"
 
     # Optimiziation
-    adv_lr: float = 1e-3
-    team_lr: float = 1e-2
+    adv_lr: float = 1e-4
+    team_lr: float = 1e-3
     max_grad_norm: float = 0.5
     gamma: float = 0.99
     nu: float = 0.05
@@ -42,8 +42,8 @@ class Args:
     log_interval: int = 100
     
     # WandB
-    project: str = "ipg-jax"
-    entity: str = "nathanmonette1"
+    project: str | None = None
+    entity: str | None = None
     group: str = "debug"
     log: bool = False
 
@@ -101,137 +101,41 @@ def make_train(args):
             avg_train_states = all_train_states.replace(
                 team_train_state = all_train_states.team_train_state.replace(
                     params = jax.tree_util.tree_map(
-                        lambda prev, x: (prev + x.cumsum(axis=0)) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), sum_train_states, all_train_states.team_train_state.params
+                        lambda prev, x: (prev + x.cumsum(axis=0)) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1), sum_train_states.team_train_state.params, all_train_states.team_train_state.params
                     )
                 ),
                 adv_train_state = all_train_states.adv_train_state.replace(
                     params = jax.tree_util.tree_map(
-                        lambda prev, x: (prev + x.cumsum(axis=0)) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1),  sum_train_states, all_train_states.adv_train_state.params
+                        lambda prev, x: (prev + x.cumsum(axis=0)) / (jnp.ones(x.shape[0]).cumsum() + t).reshape(args.log_interval, -1, 1, 1),  sum_train_states.adv_train_state.params, all_train_states.adv_train_state.params
                     )
                 )
             )
             
-            sum_train_states = avg_train_states = all_train_states.replace(
+            sum_train_states = all_train_states.replace(
                 team_train_state = train_state.team_train_state.replace(
                     params = jax.tree_util.tree_map(
-                        lambda prev, x: prev + x.sum(axis=0), sum_train_states, all_train_states.team_train_state.params
+                        lambda prev, x: prev + x.sum(axis=0), sum_train_states.team_train_state.params, all_train_states.team_train_state.params
                     )
                 ),
                 adv_train_state = train_state.adv_train_state.replace(
                     params = jax.tree_util.tree_map(
-                        lambda prev, x: prev + x.sum(axis=0), sum_train_states, all_train_states.adv_train_state.params
+                        lambda prev, x: prev + x.sum(axis=0), sum_train_states.adv_train_state.params, all_train_states.adv_train_state.params
                     )
                 )
             )
 
-            ## NOTE: we should really do this every n steps instead haha
             rng, _rng = jax.random.split(rng)
             _rng = jax.random.split(_rng, args.log_interval)
             gaps = gap_fn(_rng, avg_train_states)
-
             metrics["nash_gap"] = gaps
 
-            for step in range(args.log_interval):
-                wandb.log(
-                    jax.tree_util.tree_map(lambda x: x[step], metrics)
+            if args.log:
+                for step in range(args.log_interval):
+                    wandb.log(
+                        jax.tree_util.tree_map(lambda x: x[step], metrics)
                 )
         
     return _train_fn
-
-
-def test_br():
-
-    args = tyro.cli(Args)
-
-    if args.log:
-        wandb.init(
-            config=args,
-            project=args.project,
-            entity=args.entity,
-            group=args.group,
-            job_type="train",
-        )
-
-    rng = jax.random.key(args.seed)
-
-    env, obs_dims, num_actions, num_agents = get_env(args)
-
-    rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
-    br_fn = make_br(args, rollout_fn, obs_dims)
-
-    rng, _rng = jax.random.split(rng)
-    team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
-    rng, _rng = jax.random.split(rng)
-    adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1, True)
-
-    train_state = TrainState(team_train_state, adv_train_state)
-    
-    rng, _rng = jax.random.split(rng)
-    train_state, metrics = jax.jit(br_fn)(_rng, train_state)
-
-    if args.log:
-        for step in range(args.num_br_steps):
-            wandb.log(
-                jax.tree_util.tree_map(lambda x: x[step], metrics)
-            )
-
-
-def test_team():
-
-    args = tyro.cli(Args)
-
-    if args.log:
-        wandb.init(
-            config=args,
-            project=args.project,
-            entity=args.entity,
-            group=args.group,
-            job_type="train",
-        )
-
-    rng = jax.random.key(args.seed)
-    env, obs_dims, num_actions, num_agents = get_env(args)
-
-    rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
-    reinforce_fn = make_reinforce(args, rollout_fn)
-
-    rng, _rng = jax.random.split(rng)
-    team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
-    rng, _rng = jax.random.split(rng)
-    adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1, True)
-
-    train_state = TrainState(team_train_state, adv_train_state)
-    
-    rng, _rng = jax.random.split(rng)
-
-    def scan_fn(carry, t):
-        rng, train_state, sum_params = carry
-
-        rng, _rng = jax.random.split(rng)
-        train_state, metrics = reinforce_fn(_rng, train_state)
-
-        sum_params = jax.tree_util.tree_map(
-            lambda x, y: x + y, sum_params, train_state.team_train_state.params
-        )
-
-        test_params = jax.tree_util.tree_map(
-            lambda x: x / t, sum_params
-        )
-
-        rng, _rng = jax.random.split(rng)
-        _, returns, _ = rollout_fn(_rng, train_state.replace(team_train_state = train_state.team_train_state.replace(params=test_params)))
-
-        metrics["avg_team_return"] = returns[0]
-
-        return (rng, train_state, sum_params), metrics
-
-    (_, train_state, _), metrics = jax.lax.scan(scan_fn, (rng, train_state, train_state.team_train_state.params), xs=jnp.arange(1, args.num_steps + 1))
-
-    if args.log:
-        for step in range(args.num_steps):
-            wandb.log(
-                jax.tree_util.tree_map(lambda x: x[step], metrics)
-            )
 
 def main():
 
@@ -253,4 +157,3 @@ def main():
 if __name__ == "__main__":
     # main()
     test_br()
-    # test_team()

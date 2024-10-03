@@ -27,7 +27,7 @@ def make_reinforce(args, rollout_fn):
                         log_probs = jnp.log(action_probs + 1e-6)
                         gamma = jnp.cumprod(jnp.full(log_probs.shape[1], args.gamma)) / args.gamma
 
-                        return -(gamma * data.reward * log_probs.cumsum(axis=1) * ~data.done.squeeze()).sum()
+                        return -(gamma * data.reward * log_probs.cumsum(axis=1) * data.valid_mask.squeeze()).sum()
 
                     return jax.vmap(inner_fn)(data, probs).mean()
 

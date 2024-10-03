@@ -11,6 +11,7 @@ class Transition:
     reward: jnp.ndarray
     next_obs: jnp.ndarray
     done: jnp.ndarray
+    valid_mask: jnp.ndarray
 
 def make_rollout(args, env, obs_dims, num_actions, num_agents):
 
@@ -34,6 +35,7 @@ def make_rollout(args, env, obs_dims, num_actions, num_agents):
                 reward=reward,
                 next_obs=next_obs, 
                 done=jnp.full((num_agents, 1), done), 
+                valid_mask=jnp.full((num_agents, 1), valid_mask)
             )
 
             carry = (
