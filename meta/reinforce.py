@@ -35,9 +35,10 @@ def make_reinforce(args, rollout_fn):
                 loss, grad = loss_fn(train_state.params, data)
                 train_state = train_state.apply_gradients(grads=grad)
                 
-                train_state = train_state.replace(
-                    params = jax.tree_util.tree_map(lambda x: projection_simplex_truncated(x, args.trunc_size), train_state.params)
-                ) 
+                if args.policy == "direct":
+                    train_state = train_state.replace(
+                        params = jax.tree_util.tree_map(lambda x: projection_simplex_truncated(x, args.trunc_size), train_state.params)
+                    ) 
 
                 return train_state, loss
             

@@ -23,7 +23,8 @@ def make_rollout(args, env, obs_dims, num_actions, num_agents):
         def _env_loop(carry, t):
             rng, train_state, obs, env_state, returns, valid_mask, gamma, lambda_ = carry
 
-            actions = train_state.get_actions(rng, obs)
+            rng, _rng = jax.random.split(rng)
+            actions = train_state.get_actions(_rng, obs)
             rng, _rng = jax.random.split(rng)
             next_obs, next_state, reward, done, info = env.step(
                 _rng, env_state, actions, env.default_params
