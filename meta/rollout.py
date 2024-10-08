@@ -91,3 +91,48 @@ def make_rollout(args, env, obs_dims, num_actions, num_agents):
         return transitions, returns.mean(axis=0), lambda_.mean(axis=0)
     
     return collect_rollouts
+
+
+def make_vis_rollout(args, env, obs_dims, num_actions, num_agents):
+
+    def collect_rollouts(
+        rng, 
+        train_state,
+    ):
+
+        def _env_loop(carry, t):
+            rng, train_state, obs, env_state = carry
+
+            rng, _rng = jax.random.split(rng)
+            actions = train_state.get_actions(_rng, obs)
+            rng, _rng = jax.random.split(rng)
+            next_obs, next_state, reward, done, info = env.step_env(
+                _rng, env_state, actions, env.default_params
+            )
+
+            carry = (
+                rng, 
+                train_state,
+                next_obs, 
+                next_state
+            )
+
+            return carry, env_state
+        
+        # --- Initialize environment ---
+        rng, _rng = jax.random.split(rng)
+        init_obs, init_state = env.reset(_rng, env.default_params) # vmap reset env
+        
+        carry_out, states = jax.lax.scan(
+            _env_loop, (
+                rng, 
+                train_state,
+                init_obs, 
+                init_state,
+            ), length=args.rollout_length)
+
+        states = jax.tree_map(lambda x, y: jnp.concatenate((x, y.reshape(-1, *y.shape))), states, carry_out[-1])
+            
+        return states
+    
+    return collect_rollouts

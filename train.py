@@ -15,6 +15,10 @@ from meta import (
 from models import create_train_state
 from environments import get_env
 
+from meta.rollout import make_vis_rollout
+from environments.grid_visualizer import GridVisualizer
+from environments.multigrid2 import ENV_CONFIG
+
 @dataclass
 class Args:
     # Environment
@@ -173,6 +177,21 @@ def test_br():
                 jax.tree_util.tree_map(lambda x: x[step], metrics)
             )
 
+    rollout_fn = make_vis_rollout(args, env, obs_dims, num_actions, num_agents)
+
+    rng, _rng = jax.random.split(rng)
+    states = rollout_fn(_rng, train_state)
+
+    states_seq = []
+    for i in range(states.agent.shape[0]):
+        tree = jax.tree_util.tree_map(lambda x: x[i], states)
+        states_seq.append(tree)
+
+    viz = GridVisualizer(ENV_CONFIG, states_seq)
+    viz.animate()
+
+
+
 def main():
 
     args = tyro.cli(Args)
@@ -191,4 +210,5 @@ def main():
     train_fn(rng)
 
 if __name__ == "__main__":
-    main()
+    # main()
+    test_br()

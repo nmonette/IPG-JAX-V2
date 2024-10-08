@@ -15,7 +15,7 @@ class EnvState(environment.EnvState):
     time: jnp.ndarray
 
 ENV_CONFIG = {
-    "DIM": 3,
+    "DIM": 5,
     "MAX_TIME": 12,
     "NUM_AGENTS": 3,
     "NUM_GOALS": 2
