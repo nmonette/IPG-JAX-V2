@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax.training.train_state import TrainState
+
 from .direct import DirectPolicy
 from .nn import MLPPolicy
 
@@ -23,7 +24,7 @@ def create_train_state(args, rng, obs_dims, num_actions, num_agents, adv = False
         )
 
     elif args.policy == "nn":
-        policy = MLPPolicy(num_actions, num_agents)
+        policy = MLPPolicy(obs_dims, num_actions, num_agents)
         params = policy.init(rng, jnp.zeros((num_agents, len(obs_dims[1:])), dtype=int))
 
         tx = optax.chain(

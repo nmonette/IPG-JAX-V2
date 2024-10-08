@@ -43,7 +43,7 @@ class AdvMatrix(environment.Environment):
         )
     
     def observation_space(self, params: EnvParams = None):
-        return spaces.Tuple((spaces.Discrete(self.num_agents), spaces.Discrete(1)))
+        return spaces.Tuple((spaces.Discrete(self.num_agents), spaces.Discrete(self.num_states)))
 
     @property
     def default_params(self) -> EnvParams:

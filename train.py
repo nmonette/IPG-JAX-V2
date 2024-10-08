@@ -137,6 +137,42 @@ def make_train(args):
         
     return _train_fn
 
+def test_br():
+
+    args = tyro.cli(Args)
+
+    if args.log:
+        wandb.init(
+            config=args,
+            project=args.project,
+            entity=args.entity,
+            group=args.group,
+            job_type="train",
+        )
+
+    rng = jax.random.key(args.seed)
+
+    env, obs_dims, num_actions, num_agents = get_env(args)
+
+    rollout_fn = make_rollout(args, env, obs_dims, num_actions, num_agents)
+    br_fn = make_br(args, rollout_fn, obs_dims)
+
+    rng, _rng = jax.random.split(rng)
+    team_train_state = create_train_state(args, _rng, obs_dims, num_actions, num_agents - 1)
+    rng, _rng = jax.random.split(rng)
+    adv_train_state = create_train_state(args, _rng, obs_dims, num_actions, 1, True)
+
+    train_state = TrainState(team_train_state, adv_train_state)
+    
+    rng, _rng = jax.random.split(rng)
+    train_state, metrics = jax.jit(br_fn)(_rng, train_state)
+
+    if args.log:
+        for step in range(args.num_br_steps):
+            wandb.log(
+                jax.tree_util.tree_map(lambda x: x[step], metrics)
+            )
+
 def main():
 
     args = tyro.cli(Args)
